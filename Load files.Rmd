@@ -1,0 +1,465 @@
+---
+title: "Untitled"
+author: "Gabriel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+#Pacotes
+```{r}
+library(tidyverse)
+library(GEOquery)
+library(oligo)
+library(affycoretools)
+library(limma)
+library(hugene21sttranscriptcluster.db)
+library(FactoMineR); library(factoextra)
+library(clusterProfiler)
+```
+
+```{r}
+datasets <- read.delim("../Datasets.txt",sep = ";", row.names = NULL)
+datasets
+```
+
+#Microarray
+##GSE200828
+```{r}
+id.1 <- "GSE200828"
+
+gse.1 <- getGEO(id.1)[[1]]
+pdata.1 <- pData(gse.1)
+
+pdata.1$Group <- str_split(pdata.1$title, "_") %>% map_chr(tail,1)
+
+gsm.1 <- pdata.1 %>% filter(Group %in% c("Living donor", "FSGS"))
+
+
+dir.create(paste0("Samples/", id.1))
+for (i in gsm.1$geo_accession){
+  getGEOSuppFiles(i, makeDirectory = F, baseDir = paste0("Samples/", id.1))
+}
+
+gsm.1$celfile <- str_split(gsm.1$supplementary_file, "/") %>% map_chr(tail,1)
+gse.1_celdata <- read.celfiles(paste0("Samples/GSE200828/", gsm.1$celfile))
+
+gse.1_celdata@annotation
+eset.1 <- rma(gse.1_celdata)
+eset.1 <- annotateEset(eset.1, hugene21sttranscriptcluster.db, columns = c("PROBEID", "ENTREZID", "SYMBOL", "GENENAME", "ENSEMBL"))
+dim(eset.1)
+
+colnames(fData(eset.1))
+
+oligo::boxplot(eset.1)
+oligo::hist(eset.1)
+
+eset.1 <- subset(eset.1, !is.na(fData(eset.1)$ENSEMBL))
+arrayQualityMetrics::arrayQualityMetrics(eset.1, force = T)
+
+fData(eset.1) %>% View()
+
+```
+
+###Baixas leituras
+```{r}
+medians.1 <- rowMedians(exprs(eset.1))
+
+hist(medians.1, 100, freq=F, col='cornsilk')
+abline(v=1.1, col='red')
+
+table(gsm.1$Group)
+
+threshold <- apply(eset.1, 1, function(x) {
+  sum(x > 1.1) >= 6
+})
+
+table(threshold)
+eset.1_filtered <- subset(eset.1, threshold)
+exp.1_filtered  <- exprs(eset.1_filtered)
+
+oligo::hist(eset.1_filtered)
+oligo::boxplot(eset.1_filtered)
+
+oligo::hist(eset.1)
+oligo::boxplot(eset.1)
+```
+
+```{r}
+dist <- dist(t(exp.1_filtered))
+hc <- hclust(dist)
+dend <- as.dendrogram(hc)
+plot(dend)
+
+pca.1 <- PCA(t(exp.1_filtered), graph=F)
+fviz_pca_ind(pca.1)
+```
+
+##GSE104948
+```{r}
+id.2 <- "GSE104948"
+
+gse.2.1 <- getGEO(id.2)[[1]]
+gse.2.2 <- getGEO(id.2)[[2]]
+
+pdata.2.1 <- pData(gse.2.1)
+pdata.2.2 <- pData(gse.2.2)
+
+pdata.2.1$`diagnosis:ch1` <- replace_na(pdata.2.1$`diagnosis:ch1`, 'Living donor')
+pdata.2.2$`diagnosis:ch1` <- replace_na(pdata.2.2$`diagnosis:ch1`, 'Living donor')
+
+gsm.2.1 <- pdata.2.1 %>% filter(`diagnosis:ch1` %in% c("Living donor", "Focal Segmental Glomerular Sclerosis"))
+gsm.2.2 <- pdata.2.2 %>% filter(`diagnosis:ch1` %in% c("Living donor", "Focal Segmental Glomerular Sclerosis"))
+
+
+dir.create(paste0("Samples/", id.2))
+dir.create(paste0("Samples/", id.2, "/", gse.2.1$platform_id[1]))
+
+dir.create(paste0("Samples/", id.2, "/", gse.2.2$platform_id[1]))
+
+for (i in gsm.2.1$geo_accession){
+  getGEOSuppFiles(i, makeDirectory = F, baseDir = paste0("Samples/", id.2, "/", gse.2.1$platform_id[1]))
+}
+
+for (i in gsm.2.2$geo_accession){
+  getGEOSuppFiles(i, makeDirectory = F, baseDir = paste0("Samples/", id.2, "/", gse.2.2$platform_id[1]))
+}
+```
+
+
+```{r}
+gsm.2.1$celfile <- str_split(gsm.2.1$supplementary_file, "/") %>% map_chr(tail,1)
+gse.2.1_celdata <- read.celfiles(paste0("Samples/GSE104948/GPL22945/", gsm.2.1$celfile))
+
+gse.2.1_celdata@annotation
+eset.2.1 <- rma(gse.2.1_celdata)
+library(hgu133plus2.db)
+eset.2.1 <- annotateEset(eset.2.1, hgu133plus2.db, columns = c("PROBEID", "ENTREZID", "SYMBOL", "GENENAME", "ENSEMBL"))
+
+colnames(fData(eset.2.1))
+
+
+gsm.2.2$celfile <- str_split(gsm.2.2$supplementary_file, "/") %>% map_chr(tail,1)
+gse.2.2_celdata <- read.celfiles(paste0("Samples/GSE104948/GPL24120/", gsm.2.2$celfile))
+
+gse.2.2_celdata@annotation
+eset.2.2 <- rma(gse.2.2_celdata)
+library(hgu133a.db)
+eset.2.2 <- annotateEset(eset.2.2, hgu133a.db, columns = c("PROBEID", "ENTREZID", "SYMBOL", "GENENAME", "ENSEMBL"))
+
+colnames(fData(eset.2.2))
+fData(eset.2.1) %>% View()
+
+grepl("pseudogene", fData(eset.2.1)$GENENAME)
+grepl("LINC", fData(eset.2.1)$SYMBOL)
+
+eset.2.1 <- subset(eset.2.1, !is.na(fData(eset.2.1)$ENSEMBL))
+eset.2.1 <- subset(eset.2.1, !grepl("pseudogene", fData(eset.2.1)$GENENAME))
+eset.2.1 <- subset(eset.2.1, !grepl("LINC", fData(eset.2.1)$SYMBOL))
+
+eset.2.2 <- subset(eset.2.2, !is.na(fData(eset.2.2)$ENSEMBL))
+eset.2.2 <- subset(eset.2.2, !grepl("pseudogene", fData(eset.2.2)$GENENAME))
+eset.2.2 <- subset(eset.2.2, !grepl("LINC", fData(eset.2.2)$SYMBOL))
+
+#arrayQualityMetrics::arrayQualityMetrics(eset.2.1, force = T)
+#arrayQualityMetrics::arrayQualityMetrics(eset.2.2, force = T)
+```
+
+###Baixas leituras
+```{r}
+medians.2.1 <- rowMedians(exprs(eset.2.1))
+
+hist(medians.2.1, 100, freq=F, col='cornsilk')
+abline(v=5.2, col='red')
+
+table(gsm.2.1$`diagnosis:ch1`)
+threshold <- apply(eset.2.1, 1, function(x) {
+  sum(x > 5.2) >= 10
+})
+
+table(threshold)
+eset.2.1_filtered <- subset(eset.2.1, threshold)
+exp.2.1_filtered  <- exprs(eset.2.1_filtered)
+
+oligo::hist(eset.2.1_filtered)
+oligo::boxplot(eset.2.1_filtered)
+
+oligo::hist(eset.2.1)
+oligo::boxplot(eset.2.1)
+```
+```{r}
+medians.2.2 <- rowMedians(exprs(eset.2.2))
+
+hist(medians.2.2, 100, freq=F, col='cornsilk')
+abline(v=6.4, col='red')
+
+table(gsm.2.2$`diagnosis:ch1`)
+threshold <- apply(eset.2.2, 1, function(x) {
+  sum(x > 6.4) >= 3
+})
+
+table(threshold)
+eset.2.2_filtered <- subset(eset.2.2, threshold)
+exp.2.2_filtered  <- exprs(eset.2.2_filtered)
+
+oligo::hist(eset.2.2_filtered)
+oligo::boxplot(eset.2.2_filtered)
+
+oligo::hist(eset.2.2)
+oligo::boxplot(eset.2.2)
+```
+
+```{r}
+dist <- dist(t(exp.2.1_filtered))
+hc <- hclust(dist)
+dend <- as.dendrogram(hc)
+plot(dend)
+
+dist <- dist(t(exp.2.2_filtered))
+hc <- hclust(dist)
+dend <- as.dendrogram(hc)
+plot(dend)
+```
+
+##DEG
+```{r}
+gsm.1$Group
+gsm.2.1$`diagnosis:ch1`
+gsm.2.2$`diagnosis:ch1`
+```
+
+```{r}
+####GSE 1
+design.1 <- model.matrix(~ 0 + gsm.1$Group)
+colnames(design.1) <- c("FSGS", "LivingDonor")
+
+contrastMatrix <- makeContrasts(FSGS - LivingDonor,
+                                levels=colnames(design.1))
+contrastMatrix
+
+fit_1 <- lmFit(eset.1_filtered, design.1)
+fit_1 <- contrasts.fit(fit_1, contrasts = contrastMatrix)
+fit2_1 <- eBayes(fit_1)
+
+summary(decideTests(fit2_1, lfc = 2, adjust.method = 'fdr', p.value = 0.05))
+
+####GSE 2
+design.2.1 <- model.matrix(~ 0 + gsm.2.1$`diagnosis:ch1`)
+colnames(design.2.1) <- c("FSGS", "LivingDonor")
+
+contrastMatrix <- makeContrasts(FSGS - LivingDonor,
+                                levels=colnames(design.2.1))
+contrastMatrix
+
+fit_2.1 <- lmFit(eset.2.1_filtered, design.2.1)
+fit_2.1 <- contrasts.fit(fit_2.1, contrasts = contrastMatrix)
+fit2_2.1 <- eBayes(fit_2.1)
+
+summary(decideTests(fit2_2.1, lfc = 1.5, adjust.method = 'fdr', p.value = 0.05))
+
+##
+design.2.2 <- model.matrix(~ 0 + gsm.2.2$`diagnosis:ch1`)
+colnames(design.2.2) <- c("FSGS", "LivingDonor")
+
+contrastMatrix <- makeContrasts(FSGS - LivingDonor,
+                                levels=colnames(design.2.2))
+contrastMatrix
+
+fit_2.2 <- lmFit(eset.2.2_filtered, design.2.2)
+fit_2.2 <- contrasts.fit(fit_2.2, contrasts = contrastMatrix)
+fit2_2.2 <- eBayes(fit_2.2)
+
+summary(decideTests(fit2_2.2, lfc = 1.5, adjust.method = 'fdr', p.value = 0.05))
+topTable(fit2_2.2, lfc = 1, p.value = 0.05, number = Inf) %>% View()
+
+res.1 <- topTable(fit2_1, number = Inf)
+res.2.1 <- topTable(fit2_2.1, number=Inf)
+res.2.2 <- topTable(fit2_2.2, number=Inf)
+
+##
+res.1 %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res1 (GSEA).csv", row.names = F, col.names = F)
+
+res.2.1 %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res2-1 (GSEA).csv", row.names = F, col.names = F)
+
+res.2.2 %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res2-2 (GSEA).csv", row.names = F, col.names = F)
+
+##
+
+res.1 %>% filter(adj.P.Val < 0.05) %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res1 (ORA).csv", row.names = F, col.names = F)
+
+res.2.1 %>% filter(adj.P.Val < 0.05) %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res2-1 (ORA).csv", row.names = F, col.names = F)
+
+res.2.2 %>% filter(adj.P.Val < 0.05) %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res2-2 (ORA).csv", row.names = F, col.names = F)
+
+
+res.MAs <- res.MAs %>% arrange(SYMBOL, dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, GSE, .keep_all = T)
+```
+
+
+#RNASeq
+https://f1000research.com/articles/5-1408
+```{r}
+library(edgeR)
+library(org.Hs.eg.db)
+
+gse.3 <- getGEO("GSE197307")[[1]] %>% pData(.)
+gsm.3 <- gse.3 %>% filter(`disease:ch1` %in% c("Healthy living transplant donor", "Focal Segmental Glomerulosclerosis"))
+table(gsm.3$`disease:ch1`)
+
+rnaseq <- getGEOSuppFiles("GSE197307", baseDir = "Samples/", makeDirectory = T)
+rnaseq <- read.delim("Samples/GSE197307/GSE197307_NEPTUNE_Glom_RNA_counts_2022.txt.gz")
+
+#Anotacao
+rnaseq.genes <- read.delim("Samples/GSE197307/GSE197307_NEPTUNE_Glom_RNA_counts_2022.txt.gz")[,1]
+rnaseq.genes <- str_replace_all(rnaseq.genes, "ENS*", "ENSG")
+rnaseq.genes <- rnaseq.genes %>% as.data.frame()
+colnames(rnaseq.genes) <- "ENSEMBL"
+
+genes <- AnnotationDbi::select(org.Hs.eg.db, keys=rnaseq.genes$ENSEMBL, keytype = "ENSEMBL", columns = c("ENTREZID", "SYMBOL"))
+genes <- distinct(genes, ENSEMBL, .keep_all=T)
+
+genes <- left_join(rnaseq.genes, genes)
+
+rnaseq <- rnaseq[,gsm.3$title]
+all(gsm.3$title == colnames(rnaseq))
+
+dge <- DGEList(rnaseq)
+dge$samples$group <- gsm.3$`disease:ch1`
+dge$genes <- genes
+
+
+
+cpm <- cpm(dge)
+lcpm <- cpm(dge, log=T)
+```
+
+##Baixas leituras
+```{r}
+
+dge <- dge[!is.na(dge$genes$ENTREZID),]
+dge <- dge[!grepl("LOC*", dge$genes$SYMBOL),]
+
+keep.exprs <- filterByExpr(dge, group = dge$samples$group)
+dge.filter <- dge[keep.exprs, keep.lib.sizes=FALSE]
+dim(dge)
+dim(dge.filter)
+```
+##Normalização
+```{r}
+dge.filter <- calcNormFactors(dge.filter, method = "TMM")
+
+plotMDS(cpm(dge.filter, log=T))
+```
+```{r}
+pca.rnaseq <- PCA(t(cpm(dge.filter, log=F)), graph=F)
+
+fviz_pca_ind(pca.rnaseq,
+             mean.point=F, 
+             geom.ind='point', pointshape=21,
+             fill.ind=gsm.3$`disease:ch1`,
+             addEllipses = T, ellipse.type='confidence')
+```
+
+##DEG
+```{r}
+design.rnaseq <- model.matrix(~ 0 + dge$samples$group)
+colnames(design.rnaseq) <- c("FSGS", "LivingDonor")
+contrasts.rnaseq <- makeContrasts(FSGS - LivingDonor, levels = colnames(design.rnaseq))
+
+v <- voom(dge.filter, design = design.rnaseq, plot=T)
+
+vfit <- lmFit(v, design.rnaseq)
+vfit <- contrasts.fit(vfit, contrasts=contrasts.rnaseq)
+efit <- eBayes(vfit)
+plotSA(efit)
+
+summary(decideTests(efit, p.value = 0.05, lfc = 2))
+
+res.3 <- topTable(efit, number = Inf)
+openxlsx::write.xlsx(res.3, "GSE197307 - resultados.xlsx", asTable = T)
+
+```
+
+
+```{r}
+#Interseccao de datasets
+venn.rnaseq <-  BioVenn::draw.venn(
+  list_x = filter(res.1, adj.P.Val <= 0.05 & abs(logFC) >= 0)$SYMBOL,
+                   list_y = filter(res.3, adj.P.Val <= 0.05 & abs(logFC) >= 0)$SYMBOL,
+                   list_z = filter(res.2.1, adj.P.Val <= 0.05 & abs(logFC) >= 0)$SYMBOL)
+
+venn.rnaseq <- venn.rnaseq$xyz
+
+
+#Merge com mesmas colunas
+venn.res.rnaseq <- rbind(res.1[,c(2,3,5,6,9,10)] %>% filter(SYMBOL %in% venn.rnaseq) %>% mutate(GSE="GSE200828"),
+                   res.2.1[,c(2,3,5,6,9,10)] %>% filter(SYMBOL %in% venn.rnaseq) %>% mutate(GSE="GSE104948"),       
+      res.3[,c(2,3,1,4,7,8)] %>% filter(SYMBOL %in% venn.rnaseq) %>% mutate(GSE="GSE197307")) %>% mutate(Reg=ifelse(logFC > 0, "Up", "Down")) %>% dplyr::select(SYMBOL, ENTREZID, logFC, adj.P.Val, GSE, Reg)
+
+#Manter apenas 1 entrada de cada gene por GSE
+venn.res.rnaseq <-  venn.res.rnaseq %>% arrange(SYMBOL, dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, GSE, .keep_all = T)
+
+data.frame(SYMBOL=unique(venn.rnaseq)) %>% left_join(., res.1[,c("SYMBOL", "logFC", "adj.P.Val")]) %>% left_join(.,  res.3[,c("SYMBOL", "logFC", "adj.P.Val")])
+
+
+##Manter apenas genes que tem a regulação em uma mesma direção em todos os datasets
+venn.rna.seq_wide <- pivot_wider(venn.res.rnaseq, id_cols = c(SYMBOL, ENTREZID), names_from = GSE, values_from =c(logFC, adj.P.Val, Reg))
+
+venn.keep <- venn.rna.seq_wide[venn.rna.seq_wide$Reg_GSE200828 == venn.rna.seq_wide$Reg_GSE197307,]
+venn.keep <- venn.keep[venn.keep$Reg_GSE200828 == venn.keep$Reg_GSE104948,]
+venn.keep %>% filter(Reg_GSE197307 == "Up") %>% dplyr::select(SYMBOL) %>%  write.csv("3 datasets-Up (ORA).csv", row.names = F)
+
+
+
+venn.keep %>% dplyr::select(SYMBOL) %>% write.csv("Res4 (ORA).csv", row.names = F)
+venn.keep %>% filter(Reg_GSE200828 == "Up") %>% dplyr::select(SYMBOL) %>% write.csv("Res4-UP (ORA).csv", row.names = F)
+
+res.3 %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::select(SYMBOL, logFC) %>% dplyr::arrange(dplyr::desc(logFC)) %>% write.csv("Res3 (GSEA).csv", row.names = F, col.names = F)
+
+res.3 %>% filter(adj.P.Val < 0.05) %>% dplyr::arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::arrange(dplyr::desc(logFC)) %>% dplyr::select(SYMBOL) %>% write.csv("Res3 (teste).csv", row.names = F, col.names = F)
+
+```
+
+```{r}
+GO <- enrichGO(gene = filter(venn.keep, Reg_GSE197307 == "Down")$ENTREZID,
+               OrgDb =  org.Hs.eg.db,
+               keyType = 'ENTREZID',
+               ont="BP")
+GO@result %>% View()
+
+kegg <- enrichKEGG(gene = filter(venn.keep, Reg_GSE197307 == "Down")$ENTREZID,
+                  organism = "hsa")
+kegg@result %>% View()
+
+WP <- enrichWP(gene = filter(venn.keep, Reg_GSE197307 == "Down")$ENTREZID
+               , organism = "Homo sapiens")
+WP@result %>% View()
+```
+
+
+```{r}
+venn.all <- BioVenn::draw.venn(list_x = filter(res.1)$SYMBOL,
+                   list_y = filter(res.2.1)$SYMBOL,
+                   list_z = filter(res.3)$SYMBOL, 
+                   title = NULL, subtitle = NULL, xtitle = "GSE200828", ytitle = "GSE104948", ztitle = "GSE197307")
+#plot(venn)
+
+venn.all$xyz
+
+venn.res.all <- rbind(res.1[,c(2,3,5,6,9,10)] %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE200828"),
+      res.2.1[,c(2,3,5,6,9,10)] %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE104948 - GPL1"),
+      res.3[,c(2,3,1,4,7,8)] %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE197307")) %>%
+  mutate(Reg=ifelse(logFC > 0, "Up", "Down")) %>% dplyr::select(SYMBOL, ENTREZID, logFC, adj.P.Val, GSE, Reg)
+
+venn.res.all <- venn.res.all %>% arrange(SYMBOL, dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, GSE, .keep_all = T)
+
+venn.res.all_wide <- pivot_wider(venn.res.all, id_cols = c(SYMBOL, ENTREZID), names_from = GSE, values_from = c(logFC, adj.P.Val, Reg))
+
+venn.all.keep <- venn.res.all_wide[venn.res.all_wide$`Reg_GSE104948 - GPL1` == venn.res.all_wide$Reg_GSE197307,]
+venn.all.keep <- venn.res.all_wide[venn.res.all_wide$Reg_GSE197307 == venn.res.all_wide$Reg_GSE200828,]
+
+venn.res.all <- venn.res.all %>% filter(SYMBOL %in% venn.all.keep$SYMBOL)
+
+venn.res.all %>% arrange(dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, .keep_all = T) %>% dplyr::arrange(dplyr::desc(logFC)) %>% dplyr::select(SYMBOL, logFC) %>% write.csv("3 datasets (GSEA).csv", row.names = F)
+
+```
+
