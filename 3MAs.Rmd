@@ -1,0 +1,188 @@
+---
+title: "3MAs"
+author: "Gabriel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Análise dos dados das 3 plataformas de microarray
+  Interseção entre resultados
+
+Tabelas de resultados totais:
+"res.1": GSE200828
+"res.2.1 e res.2.2": GSE104948
+
+"venn": intersecção entre resultados de microarrays
+"venn.res": dados de cada array para os genes de intersecção
+```{r}
+BioVenn::draw.venn(list_x = filter(res.1, abs(logFC) >= 0.5 & adj.P.Val <= 0.05)$SYMBOL,
+                   list_y = filter(res.2.1, abs(logFC) >= 0.5 & adj.P.Val <= 0.05)$SYMBOL,
+                   list_z = filter(res.2.2, abs(logFC) >= 0.5 & adj.P.Val <= 0.05)$SYMBOL, 
+                   title = NULL, subtitle = NULL, xtitle = "GSE200828", ytitle = "GSE104948 - GPL22945", ztitle = "GSE104948 - GPL24120", ) -> venn
+#plot(venn)
+
+venn$xyz
+
+venn.res <- rbind(res.1 %>% filter(SYMBOL %in% venn$xyz) %>% mutate(GSE="GSE200828"),
+      res.2.1 %>% filter(SYMBOL %in% venn$xyz) %>% mutate(GSE="GSE104948 - GPL1"),
+      res.2.2 %>% filter(SYMBOL %in% venn$xyz) %>% mutate(GSE="GSE104948 - GPL2")) %>% mutate(Reg=ifelse(logFC > 0, "Up", "Down")) %>% dplyr::select(SYMBOL, ENTREZID, GENENAME, logFC, adj.P.Val, GSE, Reg)
+
+venn.res <- venn.res %>% arrange(SYMBOL, dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, GSE, .keep_all = T)
+
+openxlsx::write.xlsx(res.1, "GSE200828 - resultados.xlsx", asTable = T)
+openxlsx::write.xlsx(res.2.1, "GSE104948 - resultados GPL1.xlsx", asTable = T)
+openxlsx::write.xlsx(res.2.2, "GSE104948 - resultados GPL2.xlsx", attsTable = T)
+
+unique(venn.res$SYMBOL) %>% write.csv("ResMAs.csv", row.names = F)
+
+#Confirmar que em cada array, os genes estao regulados na mesma direção
+pivot_wider(venn.res, id_cols = c(SYMBOL, ENTREZID), names_from = GSE, values_from =c(logFC, adj.P.Val, Reg)) %>% View()
+```
+
+```{r}
+kegg <- enrichKEGG(unique(venn.res$ENTREZID), organism = "hsa", keyType = "kegg")
+kegg@result %>% View()
+
+WP <- enrichWP(unique(venn.res$ENTREZID), organism = "Homo sapiens")
+WP@result %>% View()
+
+#library(ReactomePA)
+#PA <- enrichPathway(gene = venn.res$ENTREZID, organism = "human", readable = T)
+#PA@result %>% View()
+```
+
+#Enrichr
+
+#GSEA
+```{r}
+venn.all <- BioVenn::draw.venn(list_x = res.1$SYMBOL,
+                   list_y = res.2.1$SYMBOL,
+                   list_z = res.2.2$SYMBOL)
+
+venn.all$xyz
+
+res.MAs <- rbind(res.1 %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE200828"),
+      res.2.1 %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE104948 - GPL1"),
+      res.2.2 %>% filter(SYMBOL %in% venn.all$xyz) %>% mutate(GSE="GSE104948 - GPL2")) %>% mutate(Reg=ifelse(logFC > 0, "Up", "Down")) %>% dplyr::select(SYMBOL, ENTREZID, GENENAME, logFC, adj.P.Val, GSE, Reg)
+
+res.MAs <- res.MAs %>% arrange(SYMBOL, dplyr::desc(abs(logFC))) %>% distinct(., SYMBOL, GSE, .keep_all = T)
+
+res.MAs_wide <- pivot_wider(res.MAs, id_cols = c(SYMBOL, ENTREZID), names_from = GSE, values_from =c(logFC, adj.P.Val, Reg))
+
+res.MAs.keep <- res.MAs_wide$Reg_GSE200828 == res.MAs_wide$`Reg_GSE104948 - GPL1` & res.MAs_wide$`Reg_GSE104948 - GPL1` == res.MAs_wide$`Reg_GSE104948 - GPL2`
+
+res.MAs_wide <- res.MAs_wide[res.MAs.keep,]
+```
+
+##Ranks e termos
+```{r}
+#ranks
+ranks.1 <- res.MAs_wide[order(res.MAs_wide$logFC_GSE200828, decreasing = T),]$logFC_GSE200828
+names(ranks.1) <- res.MAs_wide[order(res.MAs_wide$logFC_GSE200828, decreasing = T),]$SYMBOL
+ranks.1 %>% head()
+
+ranks.2.1 <- res.MAs_wide[order(res.MAs_wide$`logFC_GSE104948 - GPL1`, decreasing = T),]$`logFC_GSE104948 - GPL1`
+names(ranks.2.1) <- res.MAs_wide[order(res.MAs_wide$`logFC_GSE104948 - GPL1`, decreasing = T),]$SYMBOL
+
+ranks.2.2 <- res.MAs_wide[order(res.MAs_wide$`logFC_GSE104948 - GPL2`, decreasing = T),]$`logFC_GSE104948 - GPL2`
+names(ranks.2.2) <- res.MAs_wide[order(res.MAs_wide$`logFC_GSE104948 - GPL2`, decreasing = T),]$SYMBOL
+
+#TERM2GENES
+msigdbr::msigdbr_collections() %>% print(n=Inf)
+H <- msigdbr::msigdbr(species = "Homo sapiens", category = "H")
+H.symbol <- dplyr::select(H, gs_name, gene_symbol)
+
+CPs <- rbind(
+   msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:KEGG"),
+   msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:REACTOME"),
+   msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:WIKIPATHWAYS"))
+CPs.symbol <- dplyr::select(CPs, gs_name, gene_symbol)
+
+TFT <- msigdbr::msigdbr(species = "Homo sapiens", category = "C3", subcategory = "TFT:GTRD")
+TFT.symbol <- dplyr::select(TFT, gs_name, gene_symbol)
+
+RA <- msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:REACTOME")
+RA.symbol <- dplyr::select(RA, gs_name, gene_symbol)
+
+GO <- msigdbr::msigdbr(species = "Homo sapiens", category = "C5", subcategory = "GO:BP")
+GO.symbol <- dplyr::select(GO, gs_name, gene_symbol)
+```
+
+##ranks.1
+```{r}
+gsea.hallmarks <- GSEA(ranks.1, TERM2GENE = H.symbol)
+gsea.hallmarks.1 <- gsea.hallmarks@result
+
+gsea.cps <- GSEA(ranks.1, TERM2GENE = CPs.symbol)
+gsea.cps.1 <- gsea.cps@result
+
+gsea.tft <- GSEA(ranks.1, TERM2GENE = TFT.symbol)
+gsea.tft.1 <- gsea.tft@result
+
+gsea.ra <- GSEA(ranks.1, TERM2GENE = RA.symbol)
+gsea.ra.1 <- gsea.ra@result
+
+gsea.go <- GSEA(ranks.1, TERM2GENE = GO.symbol)
+gsea.go.1 <- gsea.go@result
+```
+
+##ranks.2.1
+```{r}
+gsea.hallmarks <- GSEA(ranks.2.1, TERM2GENE = H.symbol)
+gsea.hallmarks.2.1 <- gsea.hallmarks@result
+
+gsea.cps <- GSEA(ranks.2.1, TERM2GENE = CPs.symbol)
+gsea.cps.2.1 <- gsea.cps@result
+
+gsea.tft <- GSEA(ranks.2.1, TERM2GENE = TFT.symbol)
+gsea.tft.2.1 <- gsea.tft@result
+
+gsea.ra <- GSEA(ranks.2.1, TERM2GENE = RA.symbol)
+gsea.ra.2.1 <- gsea.ra@result
+
+gsea.go <- GSEA(ranks.2.1, TERM2GENE = GO.symbol)
+gsea.go.2.1 <- gsea.go@result
+```
+
+##ranks.2.2
+```{r}
+gsea.hallmarks <- GSEA(ranks.2.2, TERM2GENE = H.symbol)
+gsea.hallmarks.2.2 <- gsea.hallmarks@result
+
+gsea.cps <- GSEA(ranks.2.2, TERM2GENE = CPs.symbol)
+gsea.cps.2.2 <- gsea.cps@result
+
+gsea.tft <- GSEA(ranks.2.2, TERM2GENE = TFT.symbol)
+gsea.tft.2.2 <- gsea.tft@result
+
+gsea.ra <- GSEA(ranks.2.2, TERM2GENE = RA.symbol)
+gsea.ra.2.2 <- gsea.ra@result
+
+gsea.go <- GSEA(ranks.2.2, TERM2GENE = GO.symbol)
+gsea.go.2.2 <- gsea.go@result
+```
+
+#Plots
+```{r}
+gsea.go.1 %>% slice_max(order_by = p.adjust, n = 10) %>% View()
+msigdb.hs <- rbind(gsea.hallmarks.1 %>% mutate(GSE = "GSE200828"),
+                   gsea.hallmarks.2.1 %>% mutate(GSE = "GSE104948 - GPL1"),
+                   gsea.hallmarks.2.2 %>% mutate(GSE = "GSE104948 - GPL2"))
+msigdb.hs %>% ggplot(aes(GSE, ID, fill=NES))+
+  geom_tile()
+  
+  
+cps.res <-  rbind(gsea.cps.1 %>% mutate(GSE = "GSE200828") %>% slice_max(p.adjust, n = 20),
+                   gsea.cps.2.1 %>% mutate(GSE = "GSE104948 - GPL1") %>% slice_max(p.adjust, n = 20),
+                   gsea.cps.2.2 %>% mutate(GSE = "GSE104948 - GPL2") %>% slice_max(p.adjust, n = 20))
+cps.res %>% ggplot(aes(GSE, ID, fill=NES))+
+  geom_tile()
+
+ra.res <-  rbind(gsea.ra.1 %>% mutate(GSE = "GSE200828") %>% slice_max(p.adjust, n = 20),
+                   gsea.ra.2.1 %>% mutate(GSE = "GSE104948 - GPL1") %>% slice_max(p.adjust, n = 20),
+                   gsea.ra.2.2 %>% mutate(GSE = "GSE104948 - GPL2") %>% slice_max(p.adjust, n = 20))
+ra.res %>% ggplot(aes(GSE, ID, fill=NES))+
+  geom_tile()
+
+```
+
